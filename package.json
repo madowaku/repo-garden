@@ -1,0 +1,23 @@
+{
+  "name": "repo-garden",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discover GitHub repositories useful for AI agent cultivation and save Obsidian notes.",
+  "scripts": {
+    "discover": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "check": "npm run build"
+  },
+  "dependencies": {
+    "yaml": "^2.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

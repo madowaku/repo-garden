@@ -1,0 +1,20 @@
+defaults:
+  per_query: 8
+  max_readme_chars: 12000
+  min_agent_usefulness_score: 0
+
+queries:
+  - name: mcp
+    query: 'MCP server AI agent in:name,description,readme'
+  - name: coding-agent
+    query: 'coding agent AGENTS.md in:name,description,readme'
+  - name: agent-memory
+    query: 'AI agent memory RAG in:name,description,readme'
+  - name: obsidian-agent
+    query: 'Obsidian AI agent knowledge base in:name,description,readme'
+  - name: github-automation
+    query: 'GitHub automation AI agent pull request in:name,description,readme'
+  - name: sandbox-agent
+    query: 'AI agent sandbox code execution in:name,description,readme'
+  - name: agents-md
+    query: 'AGENTS.md coding agent in:name,description,readme'
