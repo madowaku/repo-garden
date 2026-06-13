@@ -1,7 +1,20 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import process from "node:process";
 import YAML from "yaml";
+
+type SafetyRisk = "low" | "medium" | "high";
+export type AgentFoodType =
+  | "mcp"
+  | "memory"
+  | "sandbox"
+  | "github-automation"
+  | "obsidian"
+  | "agent-rules"
+  | "local-agent"
+  | "dev-workflow"
+  | "unknown";
 
 type QueryConfig = {
   name: string;
@@ -18,7 +31,7 @@ type AppConfig = {
   queries: QueryConfig[];
 };
 
-type GitHubRepo = {
+export type GitHubRepo = {
   id: number;
   name: string;
   full_name: string;
@@ -45,21 +58,22 @@ type SearchResponse = {
   items: GitHubRepo[];
 };
 
-type RepoNote = {
+export type RepoNote = {
   repo: GitHubRepo;
   readme: string;
   discoveredBy: string[];
   scores: Scores;
+  agentFoodType: AgentFoodType;
   firstSeen: string;
   lastChecked: string;
 };
 
-type Scores = {
+export type Scores = {
   agent_usefulness_score: number;
   note_potential_score: number;
   freshness_score: number;
   tryability_score: number;
-  safety_risk: "low" | "medium" | "high";
+  safety_risk: SafetyRisk;
   safety_risk_score: number;
   madowaku_interest_match: number;
 };
@@ -76,9 +90,12 @@ async function main() {
   }
 
   const configPath = path.resolve(rootDir, process.env.REPO_GARDEN_CONFIG ?? "config/keywords.yml");
-  const outDir = path.resolve(rootDir, process.env.REPO_GARDEN_OUT ?? "vault/00_Inbox");
+  const vaultDir = path.resolve(rootDir, process.env.REPO_GARDEN_VAULT ?? "vault");
+  const inboxDir = path.join(vaultDir, "00_Inbox");
+  const quarantineDir = path.join(vaultDir, "90_Quarantine");
   const config = await readConfig(configPath);
-  await mkdir(outDir, { recursive: true });
+  await mkdir(inboxDir, { recursive: true });
+  await mkdir(quarantineDir, { recursive: true });
 
   const found = new Map<string, { repo: GitHubRepo; discoveredBy: Set<string> }>();
   for (const query of config.queries) {
@@ -105,13 +122,14 @@ async function main() {
       continue;
     }
 
-    const notePath = path.join(outDir, `${safeFileName(repo.full_name)}.md`);
-    const firstSeen = await readFirstSeen(notePath);
+    const notePath = getRepoNotePath(vaultDir, repo.full_name, scores.safety_risk);
+    const firstSeen = await readFirstSeenForRepo(vaultDir, repo.full_name);
     const note: RepoNote = {
       repo,
       readme,
       discoveredBy: [...discoveredBy].sort(),
       scores,
+      agentFoodType: classifyAgentFoodType(repo, readme),
       firstSeen: firstSeen ?? today,
       lastChecked: today
     };
@@ -125,10 +143,10 @@ async function main() {
     return bTotal - aTotal;
   });
 
-  await writeFile(path.join(outDir, "weekly_digest.md"), renderDigest(notes), "utf8");
+  await writeFile(path.join(inboxDir, "weekly_digest.md"), renderDigest(notes), "utf8");
 
-  console.log(`Saved ${notes.length} repo notes to ${path.relative(rootDir, outDir)}`);
-  console.log(`Updated ${path.relative(rootDir, path.join(outDir, "weekly_digest.md"))}`);
+  console.log(`Saved ${notes.length} repo notes under ${path.relative(rootDir, vaultDir)}`);
+  console.log(`Updated ${path.relative(rootDir, path.join(inboxDir, "weekly_digest.md"))}`);
 }
 
 async function readConfig(configPath: string): Promise<AppConfig> {
@@ -194,7 +212,7 @@ async function githubFetch(url: URL, token: string, accept: string) {
   });
 }
 
-function scoreRepo(repo: GitHubRepo, readme: string): Scores {
+export function scoreRepo(repo: GitHubRepo, readme: string): Scores {
   const text = [
     repo.full_name,
     repo.description ?? "",
@@ -277,6 +295,37 @@ function scoreRepo(repo: GitHubRepo, readme: string): Scores {
   };
 }
 
+export function classifyAgentFoodType(repo: GitHubRepo, readme: string): AgentFoodType {
+  const text = repoText(repo, readme);
+  const rules: Array<[AgentFoodType, string[]]> = [
+    ["mcp", ["mcp", "model context protocol"]],
+    ["agent-rules", ["agents.md", "agent rules", "instructions", "coding agent rules"]],
+    ["memory", ["memory", "memories", "rag", "retrieval", "vector database", "embeddings"]],
+    ["sandbox", ["sandbox", "code execution", "isolated execution", "container", "docker"]],
+    ["github-automation", ["github automation", "pull request", "github action", "issues", "repository automation"]],
+    ["obsidian", ["obsidian", "vault", "wikilink", "markdown knowledge base"]],
+    ["local-agent", ["local agent", "local-first", "desktop agent", "cli agent", "on-device"]],
+    ["dev-workflow", ["developer workflow", "dev workflow", "coding workflow", "automation workflow"]]
+  ];
+
+  for (const [type, needles] of rules) {
+    if (needles.some((needle) => text.includes(needle))) {
+      return type;
+    }
+  }
+  return "unknown";
+}
+
+function repoText(repo: GitHubRepo, readme: string): string {
+  return [
+    repo.full_name,
+    repo.description ?? "",
+    repo.language ?? "",
+    ...(repo.topics ?? []),
+    readme
+  ].join(" ").toLowerCase();
+}
+
 function scoreFreshness(pushedAt: string): number {
   const ageDays = Math.max(0, (Date.now() - new Date(pushedAt).getTime()) / 86_400_000);
   if (ageDays <= 14) return 100;
@@ -307,11 +356,23 @@ async function readFirstSeen(notePath: string): Promise<string | null> {
   }
 }
 
-function renderRepoNote(note: RepoNote): string {
+async function readFirstSeenForRepo(vaultDir: string, fullName: string): Promise<string | null> {
+  const inboxPath = getRepoNotePath(vaultDir, fullName, "low");
+  const quarantinePath = getRepoNotePath(vaultDir, fullName, "high");
+  return (await readFirstSeen(inboxPath)) ?? (await readFirstSeen(quarantinePath));
+}
+
+export function getRepoNotePath(vaultDir: string, fullName: string, risk: SafetyRisk): string {
+  const folder = risk === "high" ? "90_Quarantine" : "00_Inbox";
+  return path.join(vaultDir, folder, `${safeFileName(fullName)}.md`);
+}
+
+export function renderRepoNote(note: RepoNote): string {
   const { repo, scores } = note;
   const title = `${repo.full_name} - repo discovery`;
   const tags = ["repo-garden", "ai-agent", ...note.discoveredBy.map((name) => `repo-garden/${name}`)];
   const readmeExcerpt = note.readme ? truncateForNote(note.readme, 2500) : "README could not be fetched during the latest check.";
+  const reasons = buildReasons(note);
 
   return `---
 title: ${yamlString(title)}
@@ -329,6 +390,7 @@ topics:
 ${(repo.topics?.length ? repo.topics : ["untagged"]).map((topic) => `  - ${yamlString(topic)}`).join("\n")}
 discovered_by:
 ${note.discoveredBy.map((name) => `  - ${yamlString(name)}`).join("\n")}
+agent_food_type: ${note.agentFoodType}
 agent_usefulness_score: ${scores.agent_usefulness_score}
 note_potential_score: ${scores.note_potential_score}
 freshness_score: ${scores.freshness_score}
@@ -348,6 +410,13 @@ archived: ${repo.archived}
 
 > [!summary]
 > ${repo.description ?? "No repository description."}
+
+## なぜ気になった？
+
+- agent_reason: ${reasons.agent_reason}
+- note_reason: ${reasons.note_reason}
+- try_reason: ${reasons.try_reason}
+- risk_reason: ${reasons.risk_reason}
 
 ## Scores
 
@@ -375,6 +444,7 @@ archived: ${repo.archived}
 - Open issues: ${repo.open_issues_count}
 - Last pushed: ${repo.pushed_at}
 - Topics: ${(repo.topics ?? []).join(", ") || "none"}
+- Agent food type: ${note.agentFoodType}
 
 ## README Excerpt
 
@@ -382,6 +452,17 @@ archived: ${repo.archived}
 ${readmeExcerpt}
 \`\`\`
 `;
+}
+
+function buildReasons(note: RepoNote) {
+  const { repo, scores } = note;
+  const topicHint = repo.topics?.length ? `topics include ${repo.topics.slice(0, 4).join(", ")}` : "topics are sparse";
+  return {
+    agent_reason: `${note.agentFoodType} signal with agent usefulness ${scores.agent_usefulness_score}; ${repo.description ?? "description is empty"}, and ${topicHint}.`,
+    note_reason: `Note potential ${scores.note_potential_score}; ${noteAngle(scores.note_potential_score)}`,
+    try_reason: `Tryability ${scores.tryability_score}; ${tryAngle(scores.tryability_score)}`,
+    risk_reason: `Safety risk is ${scores.safety_risk} (${scores.safety_risk_score}); ${safetyAngle(scores.safety_risk)}`
+  };
 }
 
 function renderDigest(notes: RepoNote[]): string {
@@ -459,13 +540,15 @@ function tryAngle(score: number): string {
   return "Treat as research-first until install/run instructions are clearer.";
 }
 
-function safetyAngle(risk: Scores["safety_risk"]): string {
+function safetyAngle(risk: SafetyRisk): string {
   if (risk === "high") return "Review code paths carefully before running locally or granting tokens.";
   if (risk === "medium") return "Use a throwaway token or sandbox for first experiments.";
   return "No obvious risk language detected by the MVP heuristic.";
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}

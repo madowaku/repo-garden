@@ -1,6 +1,6 @@
 # repo-garden
 
-GitHubからAIエージェント育成に役立ちそうなリポジトリを発掘し、Obsidian用Markdownとして `vault/00_Inbox` に保存するCLIです。
+GitHubからAIエージェント育成に役立ちそうなリポジトリを発掘し、Obsidian用Markdownとして `vault/00_Inbox` に保存するCLIです。`safety_risk` が `high` のrepoは `vault/90_Quarantine` に隔離します。
 
 ## Setup
 
@@ -17,7 +17,7 @@ cp .env.example .env
 npm run discover
 ```
 
-検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `last_checked` を更新します。最後に `vault/00_Inbox/weekly_digest.md` を生成します。
+検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `first_seen` を保持して `last_checked` を更新します。最後に `vault/00_Inbox/weekly_digest.md` を生成します。
 
 ## Scores
 
@@ -26,4 +26,18 @@ npm run discover
 - `freshness_score`: 最近の更新度
 - `tryability_score`: すぐ試せそうか
 - `safety_risk`: low / medium / high
-- `madowaku_interest_match`: Hiro / Madowaku文脈との一致度
+- `madowaku_interest_match`: Madowaku文脈との一致度
+
+## Agent Food Type
+
+各repoには `agent_food_type` を付けます。
+
+- `mcp`
+- `memory`
+- `sandbox`
+- `github-automation`
+- `obsidian`
+- `agent-rules`
+- `local-agent`
+- `dev-workflow`
+- `unknown`
