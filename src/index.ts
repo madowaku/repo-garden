@@ -7,13 +7,19 @@ import YAML from "yaml";
 type SafetyRisk = "low" | "medium" | "high";
 export type AgentFoodType =
   | "mcp"
+  | "agent-skills"
+  | "evaluation"
+  | "benchmark"
+  | "catalog"
   | "memory"
-  | "sandbox"
-  | "github-automation"
-  | "obsidian"
-  | "agent-rules"
+  | "rag"
   | "local-agent"
+  | "full-agent"
+  | "agent-rules"
+  | "github-automation"
+  | "sandbox"
   | "dev-workflow"
+  | "obsidian"
   | "unknown";
 
 type QueryConfig = {
@@ -63,7 +69,7 @@ export type RepoNote = {
   readme: string;
   discoveredBy: string[];
   scores: Scores;
-  agentFoodType: AgentFoodType;
+  agentFoodType: AgentFoodType[];
   firstSeen: string;
   lastChecked: string;
 };
@@ -295,25 +301,43 @@ export function scoreRepo(repo: GitHubRepo, readme: string): Scores {
   };
 }
 
-export function classifyAgentFoodType(repo: GitHubRepo, readme: string): AgentFoodType {
+export function classifyAgentFoodType(repo: GitHubRepo, readme: string): AgentFoodType[] {
   const text = repoText(repo, readme);
   const rules: Array<[AgentFoodType, string[]]> = [
     ["mcp", ["mcp", "model context protocol"]],
-    ["agent-rules", ["agents.md", "agent rules", "instructions", "coding agent rules"]],
-    ["memory", ["memory", "memories", "rag", "retrieval", "vector database", "embeddings"]],
-    ["sandbox", ["sandbox", "code execution", "isolated execution", "container", "docker"]],
-    ["github-automation", ["github automation", "pull request", "github action", "issues", "repository automation"]],
-    ["obsidian", ["obsidian", "vault", "wikilink", "markdown knowledge base"]],
+    ["agent-skills", ["skill", "skills", "agent skill", "codex skill"]],
+    ["evaluation", ["evaluation", "evaluate", "eval", "evals", "judge", "scoring"]],
+    ["benchmark", ["benchmark", "benchmarks", "leaderboard", "swe-bench", "terminal-bench"]],
+    ["catalog", ["awesome", "awesome-list", "catalog", "directory", "radar", "landscape", "curated list"]],
+    ["memory", ["memory", "memories", "persistent memory", "long-term memory"]],
+    ["rag", ["rag", "retrieval", "vector database", "embeddings", "semantic search"]],
     ["local-agent", ["local agent", "local-first", "desktop agent", "cli agent", "on-device"]],
-    ["dev-workflow", ["developer workflow", "dev workflow", "coding workflow", "automation workflow"]]
+    ["full-agent", ["full agent", "autonomous agent", "agent framework", "multi-agent", "end-to-end agent"]],
+    ["agent-rules", ["agents.md", "agent rules", "instructions", "coding agent rules", "system prompt"]],
+    ["github-automation", ["github automation", "pull request", "github action", "issues", "repository automation"]],
+    ["sandbox", ["sandbox", "code execution", "isolated execution", "container", "docker"]],
+    ["dev-workflow", ["developer workflow", "dev workflow", "coding workflow", "automation workflow", "code review"]],
+    ["obsidian", ["obsidian", "vault", "wikilink", "markdown knowledge base"]]
   ];
 
+  const matches: AgentFoodType[] = [];
   for (const [type, needles] of rules) {
-    if (needles.some((needle) => text.includes(needle))) {
-      return type;
+    if (needles.some((needle) => textMatchesNeedle(text, needle))) {
+      matches.push(type);
     }
   }
-  return "unknown";
+  return matches.length ? matches : ["unknown"];
+}
+
+function textMatchesNeedle(text: string, needle: string): boolean {
+  if (/^[a-z0-9-]+$/i.test(needle) && needle.length <= 5) {
+    return new RegExp(`\\b${escapeRegExp(needle)}\\b`).test(text);
+  }
+  return text.includes(needle);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function repoText(repo: GitHubRepo, readme: string): string {
@@ -390,7 +414,8 @@ topics:
 ${(repo.topics?.length ? repo.topics : ["untagged"]).map((topic) => `  - ${yamlString(topic)}`).join("\n")}
 discovered_by:
 ${note.discoveredBy.map((name) => `  - ${yamlString(name)}`).join("\n")}
-agent_food_type: ${note.agentFoodType}
+agent_food_type:
+${note.agentFoodType.map((type) => `  - ${type}`).join("\n")}
 agent_usefulness_score: ${scores.agent_usefulness_score}
 note_potential_score: ${scores.note_potential_score}
 freshness_score: ${scores.freshness_score}
@@ -444,7 +469,7 @@ archived: ${repo.archived}
 - Open issues: ${repo.open_issues_count}
 - Last pushed: ${repo.pushed_at}
 - Topics: ${(repo.topics ?? []).join(", ") || "none"}
-- Agent food type: ${note.agentFoodType}
+- Agent food type: ${note.agentFoodType.join(", ")}
 
 ## README Excerpt
 
@@ -458,15 +483,15 @@ function buildReasons(note: RepoNote) {
   const { repo, scores } = note;
   const topicHint = repo.topics?.length ? `topics include ${repo.topics.slice(0, 4).join(", ")}` : "topics are sparse";
   return {
-    agent_reason: `${note.agentFoodType} signal with agent usefulness ${scores.agent_usefulness_score}; ${repo.description ?? "description is empty"}, and ${topicHint}.`,
+    agent_reason: `${note.agentFoodType.join(", ")} signal with agent usefulness ${scores.agent_usefulness_score}; ${repo.description ?? "description is empty"}, and ${topicHint}.`,
     note_reason: `Note potential ${scores.note_potential_score}; ${noteAngle(scores.note_potential_score)}`,
     try_reason: `Tryability ${scores.tryability_score}; ${tryAngle(scores.tryability_score)}`,
     risk_reason: `Safety risk is ${scores.safety_risk} (${scores.safety_risk_score}); ${safetyAngle(scores.safety_risk)}`
   };
 }
 
-function renderDigest(notes: RepoNote[]): string {
-  const top = notes.slice(0, 20);
+export function renderDigest(notes: RepoNote[]): string {
+  const top = capByOwner(notes, 20, 2);
   return `---
 title: Weekly Repo Garden Digest
 tags:
@@ -490,13 +515,33 @@ ${top
   })
   .join("\n")}
 
+## Agent Skills
+
+${renderCategoryList(notes, ["agent-skills"], 10)}
+
+## MCP / Tooling
+
+${renderCategoryList(notes, ["mcp", "dev-workflow", "local-agent", "full-agent"], 10)}
+
+## Evaluation / Benchmark
+
+${renderCategoryList(notes, ["evaluation", "benchmark"], 10)}
+
+## Memory / RAG
+
+${renderCategoryList(notes, ["memory", "rag"], 10)}
+
+## Quarantine Watch
+
+${renderCategoryList(
+  notes.filter((note) => note.scores.safety_risk === "high"),
+  ["mcp", "agent-skills", "evaluation", "benchmark", "catalog", "memory", "rag", "local-agent", "full-agent", "agent-rules", "github-automation", "sandbox", "dev-workflow", "obsidian", "unknown"],
+  10
+)}
+
 ## High Note Potential
 
-${notes
-  .filter((note) => note.scores.note_potential_score >= 60)
-  .slice(0, 10)
-  .map((note) => `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] (${note.scores.note_potential_score})`)
-  .join("\n") || "- No high-potential notes in this run."}
+${renderHighNotePotential(notes)}
 
 ## Medium Or High Safety Risk
 
@@ -506,6 +551,42 @@ ${notes
   .map((note) => `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] - ${note.scores.safety_risk} (${note.scores.safety_risk_score})`)
   .join("\n") || "- No medium/high risk repositories in this run."}
 `;
+}
+
+function renderHighNotePotential(notes: RepoNote[]): string {
+  const capped = capByOwner(
+    notes.filter((note) => note.scores.note_potential_score >= 60),
+    10,
+    2
+  );
+  if (!capped.length) return "- No high-potential notes in this run.";
+  return capped.map((note) => `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] (${note.scores.note_potential_score})`).join("\n");
+}
+
+function renderCategoryList(notes: RepoNote[], categories: AgentFoodType[], limit: number): string {
+  const categorySet = new Set(categories);
+  const filtered = notes.filter((note) => note.agentFoodType.some((type) => categorySet.has(type)));
+  const capped = capByOwner(filtered, limit, 2);
+  if (!capped.length) return "- No matching repositories in this run.";
+  return capped.map(renderDigestItem).join("\n");
+}
+
+function capByOwner(notes: RepoNote[], limit: number, ownerLimit: number): RepoNote[] {
+  const ownerCounts = new Map<string, number>();
+  const selected: RepoNote[] = [];
+  for (const note of notes) {
+    const owner = note.repo.owner.login;
+    const count = ownerCounts.get(owner) ?? 0;
+    if (count >= ownerLimit) continue;
+    selected.push(note);
+    ownerCounts.set(owner, count + 1);
+    if (selected.length >= limit) break;
+  }
+  return selected;
+}
+
+function renderDigestItem(note: RepoNote): string {
+  return `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] - ${note.agentFoodType.join(", ")}; agent ${note.scores.agent_usefulness_score}, note ${note.scores.note_potential_score}, risk ${note.scores.safety_risk}`;
 }
 
 function yamlString(value: string): string {

@@ -17,7 +17,7 @@ cp .env.example .env
 npm run discover
 ```
 
-検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `first_seen` を保持して `last_checked` を更新します。最後に `vault/00_Inbox/weekly_digest.md` を生成します。
+検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `first_seen` を保持して `last_checked` を更新します。最後にカテゴリ別セクション付きの `vault/00_Inbox/weekly_digest.md` を生成します。digestでは同じownerが上位を占めすぎないよう、各リストでownerごとに最大2件まで表示します。
 
 ## Scores
 
@@ -30,14 +30,20 @@ npm run discover
 
 ## Agent Food Type
 
-各repoには `agent_food_type` を付けます。
+各repoには配列形式の `agent_food_type` を付けます。
 
 - `mcp`
+- `agent-skills`
+- `evaluation`
+- `benchmark`
+- `catalog`
 - `memory`
-- `sandbox`
-- `github-automation`
-- `obsidian`
-- `agent-rules`
+- `rag`
 - `local-agent`
+- `full-agent`
+- `agent-rules`
+- `github-automation`
+- `sandbox`
 - `dev-workflow`
+- `obsidian`
 - `unknown`
