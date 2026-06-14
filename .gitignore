@@ -5,6 +5,8 @@ dist/
 
 # Generated Obsidian notes are intentionally local by default.
 vault/00_Inbox/*.md
+vault/03_NoteSeeds/*.md
 vault/90_Quarantine/*.md
 !vault/00_Inbox/.gitkeep
+!vault/03_NoteSeeds/.gitkeep
 !vault/90_Quarantine/.gitkeep

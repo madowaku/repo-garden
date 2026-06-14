@@ -4,8 +4,11 @@ import path from "node:path";
 import {
   classifyAgentFoodType,
   extractManualReview,
+  getNoteSeedPath,
   getRepoNotePath,
   renderDigest,
+  renderNoteSeed,
+  selectArticleSeedNotes,
   renderRepoNote,
   scoreRepo,
   type GitHubRepo,
@@ -185,6 +188,57 @@ test("renderDigest puts article candidates first and hides rejected repos", () =
   assert.match(digest, /## Article Candidates\n\n- \[\[writer__good-note\|writer\/good-note\]\]/);
   assert.doesNotMatch(digest, /skip\/rejected/);
   assert.match(digest, /maybe\/keep-looking/);
+});
+
+test("selectArticleSeedNotes returns article candidates and excludes rejected repos", () => {
+  const article = {
+    ...makeNote("writer/good-note", ["catalog"], 70),
+    manualReview: {
+      status: "article_candidate" as const,
+      section: "## manual_review\n\nstatus: article_candidate\nreviewer_note: turn this into a workflow article"
+    }
+  };
+  const rejected = {
+    ...makeNote("skip/rejected", ["catalog"], 99),
+    manualReview: {
+      status: "reject" as const,
+      section: "## manual_review\n\nstatus: reject\nreviewer_note: not relevant"
+    }
+  };
+
+  const selected = selectArticleSeedNotes([rejected, article]);
+
+  assert.deepEqual(
+    selected.map((note) => note.repo.full_name),
+    ["writer/good-note"]
+  );
+});
+
+test("renderNoteSeed includes article seed sections and reviewer_note", () => {
+  const note = {
+    ...makeNote("writer/good-note", ["catalog", "agent-skills"], 70),
+    manualReview: {
+      status: "article_candidate" as const,
+      section: "## manual_review\n\nstatus: article_candidate\nreviewer_note: Compare it with Codex skills."
+    }
+  };
+
+  const seed = renderNoteSeed(note);
+
+  assert.match(seed, /^---\n/);
+  assert.match(seed, /source_repo: "writer\/good-note"/);
+  assert.match(seed, /# 仮タイトル案/);
+  assert.match(seed, /# ひとことで/);
+  assert.match(seed, /# 何ができるrepoか/);
+  assert.match(seed, /# AIエージェントにどう効くか/);
+  assert.match(seed, /# madowaku的に面白いところ/);
+  assert.match(seed, /# 注意点/);
+  assert.match(seed, /# note記事の構成案/);
+  assert.match(seed, /Compare it with Codex skills\./);
+});
+
+test("getNoteSeedPath writes seeds under vault/03_NoteSeeds", () => {
+  assert.equal(getNoteSeedPath("vault", "writer/good-note"), path.join("vault", "03_NoteSeeds", "writer__good-note.md"));
 });
 
 function makeNote(fullName: string, agentFoodType: RepoNote["agentFoodType"], agentScore: number, risk = "low"): RepoNote {

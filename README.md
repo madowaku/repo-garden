@@ -19,6 +19,8 @@ npm run discover
 
 検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `first_seen` と `manual_review` を保持して `last_checked` を更新します。最後にカテゴリ別セクション付きの `vault/00_Inbox/weekly_digest.md` を生成します。digestでは同じownerが上位を占めすぎないよう、各リストでownerごとに最大2件まで表示します。
 
+`manual_review` の `status` が `article_candidate` のrepoは、追加で `vault/03_NoteSeeds` に1 repo 1記事種Markdownを生成します。記事種には仮タイトル案、ひとことで、repo概要、AIエージェントへの効き方、Madowaku的に面白いところ、注意点、note記事の構成案を含めます。
+
 ## Scores
 
 - `agent_usefulness_score`: AIエージェント開発・運用への有用度

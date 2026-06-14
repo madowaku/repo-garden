@@ -106,9 +106,11 @@ async function main() {
   const vaultDir = path.resolve(rootDir, process.env.REPO_GARDEN_VAULT ?? "vault");
   const inboxDir = path.join(vaultDir, "00_Inbox");
   const quarantineDir = path.join(vaultDir, "90_Quarantine");
+  const noteSeedsDir = path.join(vaultDir, "03_NoteSeeds");
   const config = await readConfig(configPath);
   await mkdir(inboxDir, { recursive: true });
   await mkdir(quarantineDir, { recursive: true });
+  await mkdir(noteSeedsDir, { recursive: true });
 
   const found = new Map<string, { repo: GitHubRepo; discoveredBy: Set<string> }>();
   for (const query of config.queries) {
@@ -158,9 +160,11 @@ async function main() {
   });
 
   await writeFile(path.join(inboxDir, "weekly_digest.md"), renderDigest(notes), "utf8");
+  await writeArticleSeeds(vaultDir, notes);
 
   console.log(`Saved ${notes.length} repo notes under ${path.relative(rootDir, vaultDir)}`);
   console.log(`Updated ${path.relative(rootDir, path.join(inboxDir, "weekly_digest.md"))}`);
+  console.log(`Updated article seeds in ${path.relative(rootDir, noteSeedsDir)}`);
 }
 
 async function readConfig(configPath: string): Promise<AppConfig> {
@@ -436,6 +440,10 @@ export function getRepoNotePath(vaultDir: string, fullName: string, risk: Safety
   return path.join(vaultDir, folder, `${safeFileName(fullName)}.md`);
 }
 
+export function getNoteSeedPath(vaultDir: string, fullName: string): string {
+  return path.join(vaultDir, "03_NoteSeeds", `${safeFileName(fullName)}.md`);
+}
+
 export function renderRepoNote(note: RepoNote): string {
   const { repo, scores } = note;
   const title = `${repo.full_name} - repo discovery`;
@@ -646,6 +654,111 @@ function capByOwner(notes: RepoNote[], limit: number, ownerLimit: number): RepoN
 
 function renderDigestItem(note: RepoNote): string {
   return `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] - ${note.agentFoodType.join(", ")}; agent ${note.scores.agent_usefulness_score}, note ${note.scores.note_potential_score}, risk ${note.scores.safety_risk}, review ${manualReviewStatus(note)}`;
+}
+
+async function writeArticleSeeds(vaultDir: string, notes: RepoNote[]): Promise<void> {
+  const seedsDir = path.join(vaultDir, "03_NoteSeeds");
+  await mkdir(seedsDir, { recursive: true });
+  for (const note of selectArticleSeedNotes(notes)) {
+    await writeFile(getNoteSeedPath(vaultDir, note.repo.full_name), renderNoteSeed(note), "utf8");
+  }
+}
+
+export function selectArticleSeedNotes(notes: RepoNote[]): RepoNote[] {
+  return notes.filter((note) => manualReviewStatus(note) === "article_candidate");
+}
+
+export function renderNoteSeed(note: RepoNote): string {
+  const repo = note.repo;
+  const reviewerNote = extractReviewerNote(note.manualReview?.section);
+  const titleBase = repo.description?.replace(/[。.!?]+$/g, "") || `${repo.full_name} を試す`;
+  return `---
+title: ${yamlString(`${repo.full_name} note記事の種`)}
+tags:
+  - repo-garden
+  - note-seed
+source_repo: ${yamlString(repo.full_name)}
+repo_url: ${yamlString(repo.html_url)}
+owner: ${yamlString(repo.owner.login)}
+agent_food_type:
+${note.agentFoodType.map((type) => `  - ${type}`).join("\n")}
+manual_review_status: ${manualReviewStatus(note)}
+created_from_last_checked: ${note.lastChecked}
+---
+
+# 仮タイトル案
+
+- ${titleBase}
+- AIエージェント育成目線で見る ${repo.name}
+- ${repo.name} はMadowakuの道具箱に入るか
+
+# ひとことで
+
+${oneLineSummary(note)}
+
+# 何ができるrepoか
+
+- Repository: [${repo.full_name}](${repo.html_url})
+- Description: ${repo.description ?? "No repository description."}
+- Main language: ${repo.language ?? "unknown"}
+- Categories: ${note.agentFoodType.join(", ")}
+
+# AIエージェントにどう効くか
+
+${agentImpact(note)}
+
+# madowaku的に面白いところ
+
+${madowakuAngle(note)}
+
+# 注意点
+
+${cautionPoints(note)}
+
+# reviewer_note
+
+${reviewerNote || "まだ人間メモはありません。"}
+
+# note記事の構成案
+
+1. このrepoを見つけた背景
+2. 何ができるrepoなのか
+3. AIエージェント育成に効きそうなポイント
+4. 実際に試すならどこから触るか
+5. 注意点と安全に試すための準備
+6. Madowakuのワークフローに入れるならどう使うか
+`;
+}
+
+function extractReviewerNote(section: string | undefined): string {
+  if (!section) return "";
+  const match = section.match(/^reviewer_note:\s*(.*)$/m);
+  return match?.[1]?.trim() ?? "";
+}
+
+function oneLineSummary(note: RepoNote): string {
+  if (note.repo.description) return note.repo.description;
+  return `${note.repo.full_name} is a ${note.agentFoodType.join(", ")} repository worth reviewing for agent workflows.`;
+}
+
+function agentImpact(note: RepoNote): string {
+  const typeText = note.agentFoodType.join(", ");
+  return `このrepoは ${typeText} の観点で、エージェントの道具・記憶・評価・開発フローを増やすヒントになりそうです。agent_usefulness_score は ${note.scores.agent_usefulness_score}、tryability_score は ${note.scores.tryability_score} です。`;
+}
+
+function madowakuAngle(note: RepoNote): string {
+  return `Madowaku文脈では、${note.agentFoodType.join(", ")} をObsidian上の知識化、Codex運用、GitHub automation、記事化のどれに接続できるかを見ると面白そうです。madowaku_interest_match は ${note.scores.madowaku_interest_match} です。`;
+}
+
+function cautionPoints(note: RepoNote): string {
+  const safety = `safety_risk は ${note.scores.safety_risk} (${note.scores.safety_risk_score}) です。`;
+  if (note.scores.safety_risk === "high") {
+    return `${safety} ローカル実行、token付与、shell実行、外部連携の前にコードと権限を確認してください。`;
+  }
+  if (note.scores.safety_risk === "medium") {
+    return `${safety} 最初は捨てtokenや隔離環境で試すのがよさそうです。`;
+  }
+  return `${safety} READMEと依存関係を確認してから、小さく試すのがよさそうです。`;
 }
 
 function manualReviewStatus(note: RepoNote): ManualReviewStatus {

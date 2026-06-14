@@ -1,0 +1,109 @@
+version: 2
+goal:
+  slug: repo-garden-article-seeds
+  title: Repo Garden Article Seeds
+  status: done
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Implement fifth-farm article seed generation for article_candidate repo notes."
+    inputs:
+      - "src/index.ts"
+      - "test/repo-note.test.ts"
+      - "README.md"
+    constraints:
+      - "Use rule-based generation only."
+      - "Do not overwrite or mutate existing repo notes beyond the current discover behavior."
+      - "Exclude manual_review status reject."
+      - "Preserve first_seen, last_checked, and manual_review behavior."
+    expected_output:
+      - "vault/03_NoteSeeds receives one Markdown seed per article_candidate repo."
+      - "Seed includes title ideas, one-liner, repo capability, agent impact, Madowaku interest, cautions, and note outline."
+      - "reviewer_note is reflected when present."
+      - "Tests cover generation and filtering."
+    allowed_files:
+      - "src/index.ts"
+      - "test/repo-note.test.ts"
+      - "README.md"
+      - ".gitignore"
+      - "vault/03_NoteSeeds/.gitkeep"
+      - "docs/goals/repo-garden-article-seeds/state.yaml"
+    verify:
+      - "npm test"
+      - "npm run build"
+      - "npm run discover"
+    stop_if:
+      - "Need external AI API."
+      - "Need to delete existing repo notes."
+      - "Verification fails twice for the same reason."
+    receipt:
+      result: done
+      changed_files:
+        - src/index.ts
+        - test/repo-note.test.ts
+        - README.md
+        - .gitignore
+        - vault/03_NoteSeeds/.gitkeep
+      commands:
+        - cmd: npm test
+          status: pass
+        - cmd: npm run build
+          status: pass
+        - cmd: npm run discover
+          status: pass
+      summary: "Fifth farm implemented: article_candidate repo notes now generate rule-based note seed Markdown under vault/03_NoteSeeds; reject repos are excluded and repo notes remain untouched."
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: blocked
+    objective: "Add sixth-farm tried run logs, impressions, and errors for status tried."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Fifth farm is not complete."
+    receipt:
+      result: blocked
+      summary: "Future-farm candidate; not part of the fifth-farm tranche."
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: blocked
+    objective: "Add seventh-farm weekly harvest generation."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Fifth farm is not complete."
+    receipt:
+      result: blocked
+      summary: "Future-farm candidate; not part of the fifth-farm tranche."
+  - id: T008
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Decide how scoring_rules.yml should learn from reject and article_candidate trends."
+    expected_output:
+      - "Decision"
+      - "Safe implementation slice"
+      - "Verification"
+    receipt: null
+  - id: T009
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Decide minimal Obsidian Canvas / Dataview output for category visualization."
+    expected_output:
+      - "Decision"
+      - "Safe implementation slice"
+      - "Verification"
+    receipt: null
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    objective: "Audit whether fifth-farm article seed generation satisfies the tranche."
+    receipt:
+      result: done
+      decision: complete
+      summary: "The tranche satisfies the fifth-farm requirements with tests for article candidate selection, reject exclusion, seed rendering, reviewer_note reflection, and seed path generation."
