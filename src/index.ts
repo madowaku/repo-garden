@@ -5,6 +5,7 @@ import process from "node:process";
 import YAML from "yaml";
 
 type SafetyRisk = "low" | "medium" | "high";
+export type ManualReviewStatus = "keep" | "maybe" | "reject" | "article_candidate" | "tried" | "unknown";
 export type AgentFoodType =
   | "mcp"
   | "agent-skills"
@@ -64,12 +65,18 @@ type SearchResponse = {
   items: GitHubRepo[];
 };
 
+export type ManualReview = {
+  status: ManualReviewStatus;
+  section: string;
+};
+
 export type RepoNote = {
   repo: GitHubRepo;
   readme: string;
   discoveredBy: string[];
   scores: Scores;
   agentFoodType: AgentFoodType[];
+  manualReview?: ManualReview;
   firstSeen: string;
   lastChecked: string;
 };
@@ -129,14 +136,15 @@ async function main() {
     }
 
     const notePath = getRepoNotePath(vaultDir, repo.full_name, scores.safety_risk);
-    const firstSeen = await readFirstSeenForRepo(vaultDir, repo.full_name);
+    const existingNote = await readExistingNoteDataForRepo(vaultDir, repo.full_name);
     const note: RepoNote = {
       repo,
       readme,
       discoveredBy: [...discoveredBy].sort(),
       scores,
       agentFoodType: classifyAgentFoodType(repo, readme),
-      firstSeen: firstSeen ?? today,
+      manualReview: existingNote.manualReview,
+      firstSeen: existingNote.firstSeen ?? today,
       lastChecked: today
     };
     await writeFile(notePath, renderRepoNote(note), "utf8");
@@ -368,22 +376,59 @@ function clamp(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-async function readFirstSeen(notePath: string): Promise<string | null> {
-  try {
-    const raw = await readFile(notePath, "utf8");
-    const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!match) return null;
-    const firstSeen = match[1].match(/^first_seen:\s*"?([^"\r\n]+)"?/m);
-    return firstSeen?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function readFirstSeenForRepo(vaultDir: string, fullName: string): Promise<string | null> {
+async function readExistingNoteDataForRepo(vaultDir: string, fullName: string): Promise<{ firstSeen: string | null; manualReview?: ManualReview }> {
   const inboxPath = getRepoNotePath(vaultDir, fullName, "low");
   const quarantinePath = getRepoNotePath(vaultDir, fullName, "high");
-  return (await readFirstSeen(inboxPath)) ?? (await readFirstSeen(quarantinePath));
+  for (const notePath of [inboxPath, quarantinePath]) {
+    try {
+      const raw = await readFile(notePath, "utf8");
+      return {
+        firstSeen: extractFirstSeen(raw),
+        manualReview: extractManualReview(raw)
+      };
+    } catch {
+      // Try the other possible location.
+    }
+  }
+  return {
+    firstSeen: null
+  };
+}
+
+function extractFirstSeen(markdown: string): string | null {
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return null;
+  const firstSeen = match[1].match(/^first_seen:\s*"?([^"\r\n]+)"?/m);
+  return firstSeen?.[1] ?? null;
+}
+
+export function extractManualReview(markdown: string): ManualReview {
+  const section = extractSection(markdown, "## manual_review") ?? defaultManualReviewSection();
+  const statusMatch = section.match(/^status:\s*([a-z_]+)/m);
+  const status = parseManualReviewStatus(statusMatch?.[1]);
+  return {
+    status,
+    section
+  };
+}
+
+function extractSection(markdown: string, heading: string): string | null {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const start = lines.findIndex((line) => line.trim() === heading);
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index].startsWith("## ")) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n").trimEnd();
+}
+
+function parseManualReviewStatus(value: string | undefined): ManualReviewStatus {
+  const allowed: ManualReviewStatus[] = ["keep", "maybe", "reject", "article_candidate", "tried", "unknown"];
+  return allowed.includes(value as ManualReviewStatus) ? (value as ManualReviewStatus) : "unknown";
 }
 
 export function getRepoNotePath(vaultDir: string, fullName: string, risk: SafetyRisk): string {
@@ -435,6 +480,8 @@ archived: ${repo.archived}
 
 > [!summary]
 > ${repo.description ?? "No repository description."}
+
+${note.manualReview?.section ?? defaultManualReviewSection()}
 
 ## なぜ気になった？
 
@@ -491,7 +538,9 @@ function buildReasons(note: RepoNote) {
 }
 
 export function renderDigest(notes: RepoNote[]): string {
-  const top = capByOwner(notes, 20, 2);
+  const visibleNotes = notes.filter((note) => manualReviewStatus(note) !== "reject");
+  const articleCandidates = visibleNotes.filter((note) => manualReviewStatus(note) === "article_candidate");
+  const top = capByOwner(visibleNotes, 20, 2);
   return `---
 title: Weekly Repo Garden Digest
 tags:
@@ -506,6 +555,10 @@ repo_count: ${notes.length}
 > [!note]
 > Generated from the latest GitHub discovery run on ${today}.
 
+## Article Candidates
+
+${renderArticleCandidates(articleCandidates)}
+
 ## Top Finds
 
 ${top
@@ -517,40 +570,46 @@ ${top
 
 ## Agent Skills
 
-${renderCategoryList(notes, ["agent-skills"], 10)}
+${renderCategoryList(visibleNotes, ["agent-skills"], 10)}
 
 ## MCP / Tooling
 
-${renderCategoryList(notes, ["mcp", "dev-workflow", "local-agent", "full-agent"], 10)}
+${renderCategoryList(visibleNotes, ["mcp", "dev-workflow", "local-agent", "full-agent"], 10)}
 
 ## Evaluation / Benchmark
 
-${renderCategoryList(notes, ["evaluation", "benchmark"], 10)}
+${renderCategoryList(visibleNotes, ["evaluation", "benchmark"], 10)}
 
 ## Memory / RAG
 
-${renderCategoryList(notes, ["memory", "rag"], 10)}
+${renderCategoryList(visibleNotes, ["memory", "rag"], 10)}
 
 ## Quarantine Watch
 
 ${renderCategoryList(
-  notes.filter((note) => note.scores.safety_risk === "high"),
+  visibleNotes.filter((note) => note.scores.safety_risk === "high"),
   ["mcp", "agent-skills", "evaluation", "benchmark", "catalog", "memory", "rag", "local-agent", "full-agent", "agent-rules", "github-automation", "sandbox", "dev-workflow", "obsidian", "unknown"],
   10
 )}
 
 ## High Note Potential
 
-${renderHighNotePotential(notes)}
+${renderHighNotePotential(visibleNotes)}
 
 ## Medium Or High Safety Risk
 
-${notes
+${visibleNotes
   .filter((note) => note.scores.safety_risk !== "low")
   .slice(0, 10)
   .map((note) => `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] - ${note.scores.safety_risk} (${note.scores.safety_risk_score})`)
   .join("\n") || "- No medium/high risk repositories in this run."}
 `;
+}
+
+function renderArticleCandidates(notes: RepoNote[]): string {
+  const capped = capByOwner(notes, 10, 2);
+  if (!capped.length) return "- No article candidates marked yet.";
+  return capped.map(renderDigestItem).join("\n");
 }
 
 function renderHighNotePotential(notes: RepoNote[]): string {
@@ -586,7 +645,15 @@ function capByOwner(notes: RepoNote[], limit: number, ownerLimit: number): RepoN
 }
 
 function renderDigestItem(note: RepoNote): string {
-  return `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] - ${note.agentFoodType.join(", ")}; agent ${note.scores.agent_usefulness_score}, note ${note.scores.note_potential_score}, risk ${note.scores.safety_risk}`;
+  return `- [[${safeFileName(note.repo.full_name)}|${note.repo.full_name}]] - ${note.agentFoodType.join(", ")}; agent ${note.scores.agent_usefulness_score}, note ${note.scores.note_potential_score}, risk ${note.scores.safety_risk}, review ${manualReviewStatus(note)}`;
+}
+
+function manualReviewStatus(note: RepoNote): ManualReviewStatus {
+  return note.manualReview?.status ?? "unknown";
+}
+
+function defaultManualReviewSection(): string {
+  return "## manual_review\n\nstatus: unknown\nreviewer_note:";
 }
 
 function yamlString(value: string): string {

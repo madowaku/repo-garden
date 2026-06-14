@@ -17,7 +17,7 @@ cp .env.example .env
 npm run discover
 ```
 
-検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `first_seen` を保持して `last_checked` を更新します。最後にカテゴリ別セクション付きの `vault/00_Inbox/weekly_digest.md` を生成します。digestでは同じownerが上位を占めすぎないよう、各リストでownerごとに最大2件まで表示します。
+検索クエリは `config/keywords.yml` で管理します。既存repoは同じMarkdownを更新し、重複作成せず `first_seen` と `manual_review` を保持して `last_checked` を更新します。最後にカテゴリ別セクション付きの `vault/00_Inbox/weekly_digest.md` を生成します。digestでは同じownerが上位を占めすぎないよう、各リストでownerごとに最大2件まで表示します。
 
 ## Scores
 
@@ -47,3 +47,25 @@ npm run discover
 - `dev-workflow`
 - `obsidian`
 - `unknown`
+
+## Manual Review
+
+各repo noteには人間用の `manual_review` セクションがあります。既存noteを更新しても、このセクションは上書きせず保持します。
+
+```markdown
+## manual_review
+
+status: unknown
+reviewer_note:
+```
+
+`status` は次のいずれかです。
+
+- `keep`
+- `maybe`
+- `reject`
+- `article_candidate`
+- `tried`
+- `unknown`
+
+`article_candidate` は `weekly_digest.md` の最上位セクションに表示されます。`reject` はnote自体を残したまま、次回digestから除外されます。
